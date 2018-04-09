@@ -85,6 +85,12 @@ def readInitImages():
         whiteMask = cv2.imread('laneData/img'+str(count)+'_lane_w.jpg')
         yellowMask = cv2.imread('laneData/img'+str(count)+'_lane_y.jpg')
         
+        # crop y axis
+        pct = 0.4
+        currImg = currImg[int(480*pct):np.shape(currImg)[0],:]
+        whiteMask = whiteMask[int(480*pct):np.shape(whiteMask)[0],:]
+        yellowMask = yellowMask[int(480*pct):np.shape(yellowMask)[0],:]
+        
         # add to list to return
         rgbImages.append(currImg)
         masks_w.append(whiteMask)
