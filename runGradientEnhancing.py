@@ -121,6 +121,47 @@ def gaussian_intersection_solve(m1,m2,std1,std2):
   c = m1**2 /(2*std1**2) - m2**2 / (2*std2**2) - np.log(std2/std1)
   return np.roots([a,b,c])
 
+def get_slope(line):
+    x1, y1, x2, y2 = line[0]
+    slope = ((y2-y1) / float(x2-x1))
+    return slope
+
+def filter_lines(lines,img_height,thresh_h_percentage,slope_cutoff):
+    """Lines should go through both the near and far region of an image. The cutoff for near and far is determined by thresh_h.
+    Also, lane slopes should be >= slope_cutoff (should probably be around .3 since they should approach vertical lines"""
+    final_lines = []
+    thresh_h = img_height * thresh_h_percentage
+    for line in lines:
+        for x1, y1, x2, y2 in line:
+            if (y1 < thresh_h and y2 > thresh_h) or (y1 > thresh_h and y2 < thresh_h):  # far near
+                slope = get_slope(line)
+                if abs(slope) >= slope_cutoff: #slope is likely to approach "vertical" slopes
+                    final_lines.append(line)
+    return final_lines
+
+def keep_part_of_image(img,h_percentage_to_keep):
+    """only keep the bottom portion of the image to feed to hough. Zero out the rest"""
+    mask = np.zeros_like(img)
+    h, w = img.shape[:2]
+    h_keep = int(h * (1-h_percentage_to_keep))
+
+    # keep some bottom percentage of image
+    mask[h_keep:h][0:w] = 1
+
+    masked_img = cv2.bitwise_and(img,mask)
+    return masked_img
+
+def draw_lines(img,lines):
+    """returns a copy of the img with the lines drawn on it"""
+    line_img = img.copy()
+    try:
+        for line in lines:
+            for x1, y1, x2, y2 in line:
+                cv2.line(line_img, (x1, y1), (x2, y2), (0, 255, 0), 3)
+    except:
+        pass
+    return line_img
+
 # read in initial 5 images with respective masks
 crop_pct = .4
 list_of_RGB_Images, imageMasks_w, imageMasks_y = readInitImages(crop_pct)
@@ -164,7 +205,6 @@ for i in xrange(2):
 
     #### Adaptive Canny Edge ###
 
-    #calculcate d
     #look at last gray scale image, and get values for each mask
     mask = colorMask[i]
     last_img_mask = mask[-int(grayImg.shape[0]*grayImg.shape[1]*crop_pct):]
@@ -182,6 +222,7 @@ for i in xrange(2):
     print("Lane mean: " + str(lane_mean))
     print("Road mean: " + str(road_mean))
 
+    #calc d
     lane_cov = cov(lane_values,lane_values)
     road_cov = cov(road_values,road_values)
 
@@ -213,28 +254,42 @@ for i in xrange(2):
     else:
         canny_img = canny_img | sub_canny_img
 
-### Hough Transform with final canny image ###
+### Keep only bottom part of canny image ###
 
 plt.imshow(canny_img,cmap="gray")
 plt.show()
 
-# ??? How to specify these parameters ??? NEED TO TUNE THESE
-rho = 1 #distance resolution in pixels
+canny_img = keep_part_of_image(canny_img,.5)
+plt.imshow(canny_img,cmap="gray")
+plt.show()
+
+### Hough Transform on canny image ###
+# Note: How to specify these parameters?
+# TODO: NEED TO TUNE THESE MORE PROBABLY
+
+rho = 2 #distance resolution in pixels
 theta = np.pi/180 #angle resolution of accumulator in radians
-threshold = 120
-minimum_line_length = 150 #a line has to be at least this long
+threshold = 110
+minimum_line_length = 80 #a line has to be at least this long
 maximum_line_gap = 250 #maximum allowed gap between line segments to treat them as a single line
 #Based on Robust Detection of Lines Using the Progressive Probabilistic Hough Transform by Matas, J. and Galambos, C. and Kittler, J.V.
 lines = cv2.HoughLinesP(canny_img, rho, theta, threshold, np.array([]), minimum_line_length, maximum_line_gap)
 
-#draw the lines on a new image
-line_img = img.copy()
-try:
-    for line in lines:
-        for x1,y1,x2,y2 in line:
-            cv2.line(line_img,(x1,y1),(x2,y2),(0,255,0),3)
-except:
-    pass
+### Filter the resulting lines ###
+
+thresh_h_percentage = .7
+slope_cutoff = .3
+lines = filter_lines(lines,img.shape[0],thresh_h_percentage,slope_cutoff)
+print("Num final lines: " + str(len(lines)))
+
+"""Next steps: 
+-perhaps whittle down to just 2 lines somehow? Like only keep 1 positively sloped and 1 negatively sloped line. Not sure how to choose the right one.
+-keep region of interest around those lines
+-collect edges in region that have similar slope as HT line as lane edges
+-curve fitting to those lane edges"""
+
+#draw lines on image to see results
+line_img = draw_lines(img,lines)
 line_img = cv2.cvtColor(line_img,cv2.COLOR_BGR2RGB)
 plt.imshow(line_img)
 plt.show()
