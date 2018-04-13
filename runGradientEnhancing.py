@@ -237,9 +237,28 @@ def select_predictions(lines,img_w):
 
     return final_lines
 
-def region_of_interest(lines):
+def region_of_interest(lines,canny_img,width=20):
     if len(lines) > 2:
         raise Exception("Shouldn't be calculating a region of interest for len(lines) > 2")
+
+    mask = np.zeros_like(canny_img)
+
+    for line in lines:
+        line_points = line[0]
+        #left = list(map(lambda x: x-(width/2), line_points))
+        #right = list(map(lambda x: x+(width/2), line_points))
+
+        left = [pt-(width/2) if i%2==0 else pt for i, pt in enumerate(line_points)]
+        right = [pt + (width / 2) if i % 2 == 0 else pt for i, pt in enumerate(line_points)]
+
+        poly = [np.array([ [left[0],left[1]], [left[2],left[3]],[right[2], right[3]],[right[0], right[1]] ],dtype=np.int32)]
+        cv2.fillPoly(mask, poly,1)
+
+    masked_canny_img = cv2.bitwise_and(canny_img, mask)
+
+    return masked_canny_img
+
+
 
 
 # read in initial 5 images with respective masks
@@ -375,4 +394,8 @@ plt.show()
 -curve fitting to those lane edges"""
 
 ## Region of Interest ## keep a region of interest around each line for lane edges to fit
-#region_of_interest(lines)
+width = 20
+masked_canny_img = region_of_interest(lines, canny_img, width)
+plt.imshow(masked_canny_img,cmap="gray")
+plt.show()
+
