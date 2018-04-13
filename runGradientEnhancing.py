@@ -180,8 +180,8 @@ def get_lowest_line(lines):
 
     #actually the "lowest" line will be the one with the highest y
     max_loc = None
-    max_value = -sys.maxint
-    for i in xrange(len(lines)):
+    max_value = -sys.maxsize
+    for i in np.arange(0,len(lines)):
         line = lines[i]
         x1,y1,x2,y2 = line[0]
         if y1 > max_value:
@@ -197,9 +197,9 @@ def select_predictions(lines,img_w):
     """Given several lines left, make the best guess as to which are the final 2"""
     final_lines = []
 
-    line_slope_tuples = map(lambda x: (x,get_slope(x)), lines)
-    pos_slope_tuples = filter(lambda x: x[1] > 0, line_slope_tuples)
-    neg_slope_tuples = filter(lambda x: x[1] <= 0, line_slope_tuples)
+    line_slope_tuples = list(map(lambda x: (x,get_slope(x)), lines))
+    pos_slope_tuples = list(filter(lambda x: x[1] > 0, line_slope_tuples))
+    neg_slope_tuples = list(filter(lambda x: x[1] <= 0, line_slope_tuples))
 
     if len(neg_slope_tuples) == 1 and len(pos_slope_tuples) == 1: #best case. 1 for each
         return lines
@@ -207,11 +207,11 @@ def select_predictions(lines,img_w):
         if len(neg_slope_tuples) == 1:
             final_line = neg_slope_tuples[0][0]
             final_lines.append(neg_slope_tuples[0][0])
-            lines = map(lambda x: x[0],pos_slope_tuples)
+            lines = list(map(lambda x: x[0],pos_slope_tuples))
         if len(pos_slope_tuples) == 1:
             final_line = pos_slope_tuples[0][0]
             final_lines.append(pos_slope_tuples[0][0])
-            lines = map(lambda x: x[0],neg_slope_tuples)
+            lines = list(map(lambda x: x[0],neg_slope_tuples))
 
         #choose the lowest line for the other side
         i, min_val = get_lowest_line(lines)
@@ -226,8 +226,8 @@ def select_predictions(lines,img_w):
         #both have more than 1
 
         #return the two lowest lines in each group
-        pos_lines = map(lambda x: x[0], pos_slope_tuples)
-        neg_lines = map(lambda x: x[0], neg_slope_tuples)
+        pos_lines = list(map(lambda x: x[0], pos_slope_tuples))
+        neg_lines = list(map(lambda x: x[0], neg_slope_tuples))
 
         i,min_val = get_lowest_line(pos_lines)
         j,min_val = get_lowest_line(neg_lines)
@@ -269,7 +269,7 @@ img = cv2.imread('laneData/img6.jpg')
 colorConv = ['w','y']
 count = 0
 canny_img = None
-for i in xrange(2):
+for i in np.arange(0,2):
     w = gradientEnhancedVectors[i][0]
     # convert image to gray with weight for respective class (w, then y)
     grayImg = convertToGray(w, img)
