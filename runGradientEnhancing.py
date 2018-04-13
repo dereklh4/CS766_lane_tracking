@@ -5,6 +5,7 @@ import os, glob
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from scipy import stats
+import sys
 
 # this function creates the training data for class c for frame t.
 # k = number of previous frames (default set arbitrarily to 10)
@@ -65,7 +66,20 @@ def applyLDA(X, y):
     # fit classifier to data
     clf.fit(X, y)
 
-    return [np.abs(clf.coef_),clf.means_]
+    w = clf.coef_
+
+    # scale between .1 and 1
+    # import sklearn
+    # scaler = sklearn.preprocessing.MinMaxScaler(feature_range=(.1,1))
+    # scaler = scaler.fit(w.reshape(-1,1))
+    # w_scaled = scaler.transform(w.reshape(-1,1))
+    #
+    # w_scaled = w_scaled / np.linalg.norm(w_scaled,1)
+    # w = np.transpose(w_scaled)
+
+    w = np.abs(w)
+
+    return [w,clf.means_]
 
 # this function converts an image with the calculated gradient-enhancing vector
 def convertToGray(w, img):
@@ -83,7 +97,7 @@ def readInitImages(crop_pct=.4):
     rgbImages = []
     masks_w = []
     masks_y = []
-    imgNum = np.arange(1,6)   
+    imgNum = np.arange(1,6)
     for count in imgNum:
         currImg = cv2.imread('laneData/img'+str(count)+'.jpg')
         whiteMask = cv2.imread('laneData/img'+str(count)+'_lane_w.jpg')
@@ -162,6 +176,72 @@ def draw_lines(img,lines):
         pass
     return line_img
 
+def get_lowest_line(lines):
+
+    #actually the "lowest" line will be the one with the highest y
+    max_loc = None
+    max_value = -sys.maxint
+    for i in xrange(len(lines)):
+        line = lines[i]
+        x1,y1,x2,y2 = line[0]
+        if y1 > max_value:
+            max_value = y1
+            max_loc = i
+        if y2 > max_value:
+            max_value = y2
+            max_loc = i
+    return [max_loc,max_value]
+
+
+def select_predictions(lines,img_w):
+    """Given several lines left, make the best guess as to which are the final 2"""
+    final_lines = []
+
+    line_slope_tuples = map(lambda x: (x,get_slope(x)), lines)
+    pos_slope_tuples = filter(lambda x: x[1] > 0, line_slope_tuples)
+    neg_slope_tuples = filter(lambda x: x[1] <= 0, line_slope_tuples)
+
+    if len(neg_slope_tuples) == 1 and len(pos_slope_tuples) == 1: #best case. 1 for each
+        return lines
+    elif len(neg_slope_tuples) == 1 or len(pos_slope_tuples) == 1:
+        if len(neg_slope_tuples) == 1:
+            final_line = neg_slope_tuples[0][0]
+            final_lines.append(neg_slope_tuples[0][0])
+            lines = map(lambda x: x[0],pos_slope_tuples)
+        if len(pos_slope_tuples) == 1:
+            final_line = pos_slope_tuples[0][0]
+            final_lines.append(pos_slope_tuples[0][0])
+            lines = map(lambda x: x[0],neg_slope_tuples)
+
+        #choose the lowest line for the other side
+        i, min_val = get_lowest_line(lines)
+        other_line = lines[i]
+
+        final_lines.append(other_line)
+
+    elif len(neg_slope_tuples) == 0 or len(pos_slope_tuples) == 0: #not getting one of the lanes...for other one, just return the one with lowest x
+        min_i, min_val = get_lowest_line(lines)
+        final_lines.append(lines[min_i])
+    else:
+        #both have more than 1
+
+        #return the two lowest lines in each group
+        pos_lines = map(lambda x: x[0], pos_slope_tuples)
+        neg_lines = map(lambda x: x[0], neg_slope_tuples)
+
+        i,min_val = get_lowest_line(pos_lines)
+        j,min_val = get_lowest_line(neg_lines)
+
+        final_lines.append(pos_lines[i])
+        final_lines.append(neg_lines[j])
+
+    return final_lines
+
+def region_of_interest(lines):
+    if len(lines) > 2:
+        raise Exception("Shouldn't be calculating a region of interest for len(lines) > 2")
+
+
 # read in initial 5 images with respective masks
 crop_pct = .4
 list_of_RGB_Images, imageMasks_w, imageMasks_y = readInitImages(crop_pct)
@@ -223,27 +303,19 @@ for i in xrange(2):
     print("Road mean: " + str(road_mean))
 
     #calc d
-    lane_cov = cov(lane_values,lane_values)
-    road_cov = cov(road_values,road_values)
-
-    intersections = gaussian_intersection_solve(lane_mean,road_mean,np.sqrt(lane_cov),np.sqrt(road_cov))
-    intersections = filter(lambda x: x > 0, intersections)
-    d = filter(lambda x: (x > lane_mean and x < road_mean) or (x < lane_mean and x > road_mean),intersections)
-    print("d:" + str(d))
-
-    #road_weight_means = all_class_means[i][0]
-    #lane_weight_means = all_class_means[i][1]
-    #th_large = abs(np.dot(w,lane_weight_means) - np.dot(w,road_weight_means))
-    #th_small = max(abs(np.dot(w,lane_weight_means)-d), abs(np.dot(w,road_weight_means)-d))
-
-    #th_large = abs(lane_mean - road_mean)
-    #th_small = max((lane_mean - d), abs(road_mean - d))
+    # lane_cov = cov(lane_values,lane_values)
+    # road_cov = cov(road_values,road_values)
+    #
+    # intersections = gaussian_intersection_solve(lane_mean,road_mean,np.sqrt(lane_cov),np.sqrt(road_cov))
+    # intersections = filter(lambda x: x > 0, intersections)
+    # d = filter(lambda x: (x > lane_mean and x < road_mean) or (x < lane_mean and x > road_mean),intersections)
+    # print("d:" + str(d))
 
     th_small = road_mean
     th_large = lane_mean
 
-    print("Large threshold: " + str(th_large))
-    print("Small threshold: " + str(th_small))
+    #print("Large threshold: " + str(th_large))
+    #print("Small threshold: " + str(th_small))
 
     sub_canny_img = cv2.Canny(grayImg,th_small,th_large)
     plt.imshow(sub_canny_img,cmap="gray")
@@ -264,8 +336,7 @@ plt.imshow(canny_img,cmap="gray")
 plt.show()
 
 ### Hough Transform on canny image ###
-# Note: How to specify these parameters?
-# TODO: NEED TO TUNE THESE MORE PROBABLY
+#TODO: May need to modify these more
 
 rho = 2 #distance resolution in pixels
 theta = np.pi/180 #angle resolution of accumulator in radians
@@ -282,14 +353,26 @@ slope_cutoff = .3
 lines = filter_lines(lines,img.shape[0],thresh_h_percentage,slope_cutoff)
 print("Num final lines: " + str(len(lines)))
 
-"""Next steps: 
--perhaps whittle down to just 2 lines somehow? Like only keep 1 positively sloped and 1 negatively sloped line. Not sure how to choose the right one.
--keep region of interest around those lines
--collect edges in region that have similar slope as HT line as lane edges
--curve fitting to those lane edges"""
+#draw lines on image to see results
+line_img = draw_lines(img,lines)
+line_img = cv2.cvtColor(line_img,cv2.COLOR_BGR2RGB)
+plt.imshow(line_img)
+plt.show()
+
+#reduce down to just 2 lines with some heuristics. In future, would be better to do heuristic of choosing lanes that best overlap with labels from last image
+lines = select_predictions(lines,img.shape[1])
+print("Reduced to " + str(len(lines)))
 
 #draw lines on image to see results
 line_img = draw_lines(img,lines)
 line_img = cv2.cvtColor(line_img,cv2.COLOR_BGR2RGB)
 plt.imshow(line_img)
 plt.show()
+
+"""Next steps: 
+-keep region of interest around those lines
+-collect edges in region that have similar slope as HT line as lane edges
+-curve fitting to those lane edges"""
+
+## Region of Interest ## keep a region of interest around each line for lane edges to fit
+#region_of_interest(lines)
