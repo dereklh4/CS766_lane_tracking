@@ -6,6 +6,7 @@ import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from scipy import stats
 import sys
+import math
 
 # this function creates the training data for class c for frame t.
 # k = number of previous frames (default set arbitrarily to 10)
@@ -79,7 +80,7 @@ def applyLDA(X, y):
 
     w = np.abs(w)
 
-    return [w,clf.means_]
+    return w
 
 # this function converts an image with the calculated gradient-enhancing vector
 def convertToGray(w, img):
@@ -201,6 +202,8 @@ def select_predictions(lines,img_w):
     pos_slope_tuples = list(filter(lambda x: x[1] > 0, line_slope_tuples))
     neg_slope_tuples = list(filter(lambda x: x[1] <= 0, line_slope_tuples))
 
+    if len(lines) == 0: #no predictions in this case...:(
+        return final_lines
     if len(neg_slope_tuples) == 1 and len(pos_slope_tuples) == 1: #best case. 1 for each
         return lines
     elif len(neg_slope_tuples) == 1 or len(pos_slope_tuples) == 1:
@@ -213,11 +216,12 @@ def select_predictions(lines,img_w):
             final_lines.append(pos_slope_tuples[0][0])
             lines = list(map(lambda x: x[0],neg_slope_tuples))
 
-        #choose the lowest line for the other side
-        i, min_val = get_lowest_line(lines)
-        other_line = lines[i]
+        #choose the lowest line for the other side, if there are some to pick from
+        if len(lines) > 0:
+            i, min_val = get_lowest_line(lines)
+            other_line = lines[i]
 
-        final_lines.append(other_line)
+            final_lines.append(other_line)
 
     elif len(neg_slope_tuples) == 0 or len(pos_slope_tuples) == 0: #not getting one of the lanes...for other one, just return the one with lowest x
         min_i, min_val = get_lowest_line(lines)
@@ -241,25 +245,41 @@ def region_of_interest(lines,canny_img,width=20):
     if len(lines) > 2:
         raise Exception("Shouldn't be calculating a region of interest for len(lines) > 2")
 
-    mask = np.zeros_like(canny_img)
-
+    masks = []
     for line in lines:
+        mask = np.zeros_like(canny_img)
+
         line_points = line[0]
-        #left = list(map(lambda x: x-(width/2), line_points))
-        #right = list(map(lambda x: x+(width/2), line_points))
 
         left = [pt-(width/2) if i%2==0 else pt for i, pt in enumerate(line_points)]
         right = [pt + (width / 2) if i % 2 == 0 else pt for i, pt in enumerate(line_points)]
 
         poly = [np.array([ [left[0],left[1]], [left[2],left[3]],[right[2], right[3]],[right[0], right[1]] ],dtype=np.int32)]
+
         cv2.fillPoly(mask, poly,1)
 
-    masked_canny_img = cv2.bitwise_and(canny_img, mask)
+        #only allowed to go up to 30% of image
+        pct = .3
+        h,w = canny_img.shape
+        mask[0:int(h * (1-pct))][0:w] = 0
 
-    return masked_canny_img
+        display_img(mask)
 
+        masks.append(mask)
 
+        #masked_canny_img = cv2.bitwise_and(canny_img, mask)
 
+    return masks
+
+def display_img(im,cmap="gray",convertToRGB=False,show_img=False): #so I have a place to easily turn plotting on and off
+    if show_img and convertToRGB:
+        im = cv2.cvtColor(im,cv2.COLOR_BGR2RGB)
+    if show_img:
+        if cmap != "":
+            plt.imshow(im,cmap=cmap) #need to set to gray because cv2 and plt do GBR vs RGB
+        else:
+            plt.imshow(im)
+        plt.show(show_img)
 
 # read in initial 5 images with respective masks
 crop_pct = .4
@@ -268,134 +288,223 @@ list_of_RGB_Images, imageMasks_w, imageMasks_y = readInitImages(crop_pct)
 # create training data
 X, y_w, y_y = createTrainingData(list_of_RGB_Images, imageMasks_w, imageMasks_y)
 
-# for each mask, compute LDA
-colorMask = [y_w, y_y]
-gradientEnhancedVectors = []
-all_class_means = []
-for mask in colorMask:
-    weight, class_means = applyLDA(X, mask)
-    gradientEnhancedVectors.append(weight)
+img_number = 5
+while img_number < 5619:
+    img_number += 1
 
-    #save class means. 1st for road, 2nd for lane. Note that we get a mean for R,G, and B for each class.
-    road_mean = class_means[0,:]
-    lane_mean = class_means[1,:]
-    all_class_means.append((road_mean,lane_mean))
+    print("\n*** Running on image " + str(img_number) + " ***")
 
-# read in image with masks
-img = cv2.imread('laneData/img6.jpg')
+    if img_number > 1000:
+        break
 
- # test on sixth image and save result
-colorConv = ['w','y']
-count = 0
-canny_img = None
-for i in np.arange(0,2):
-    w = gradientEnhancedVectors[i][0]
-    # convert image to gray with weight for respective class (w, then y)
-    grayImg = convertToGray(w, img)
-    # save image
-    cv2.imwrite("laneData/img6_gray_" + str(colorConv[count]) + ".jpg", grayImg)
-    
-    # display image
-    plt.imshow(grayImg, cmap = plt.get_cmap('gray'))
-    plt.show()
-    count = count + 1
+    # for each mask, compute LDA
+    colorMask = [y_w, y_y]
+    gradientEnhancedVectors = []
+    for mask in colorMask:
+        weight = applyLDA(X, mask)
+        gradientEnhancedVectors.append(weight)
 
-    road_means, lane_means = all_class_means[i]
+    # read in next image
+    img = cv2.imread('laneData/img' + str(img_number) + '.jpg')
 
-    #### Adaptive Canny Edge ###
+     # test on next image and save result
+    colorConv = ['w','y']
+    count = 0
+    canny_img = None
+    for i in np.arange(0,2):
+        w = gradientEnhancedVectors[i][0]
 
-    #look at last gray scale image, and get values for each mask
-    mask = colorMask[i]
-    last_img_mask = mask[-int(grayImg.shape[0]*grayImg.shape[1]*crop_pct):]
-    last_gray_img = convertToGray(w,list_of_RGB_Images[-1])
-    last_gray_img = last_gray_img.flatten()[-int(grayImg.shape[0] * grayImg.shape[1] * crop_pct):]
+        if (w == 0).all(): #if have no predictions for a certain mask, will get all 0 weights. In that case, default to this
+            w = np.array([.1,.4,.5])
 
-    lane_indices = np.nonzero(last_img_mask)
-    lane_values = last_gray_img[lane_indices]
-    road_indices = np.where(last_img_mask == 0)[0]
-    road_values = last_gray_img[road_indices]
+        # convert image to gray with weight for respective class (w, then y)
+        grayImg = convertToGray(w, img)
 
-    lane_mean = np.mean(lane_values)
-    road_mean = np.mean(road_values)
+        # save image
+        #cv2.imwrite("laneData/img" + str(i) + "_gray_" + str(colorConv[count]) + ".jpg", grayImg)
 
-    print("Lane mean: " + str(lane_mean))
-    print("Road mean: " + str(road_mean))
+        # display image
+        display_img(grayImg)
 
-    #calc d
-    # lane_cov = cov(lane_values,lane_values)
-    # road_cov = cov(road_values,road_values)
-    #
-    # intersections = gaussian_intersection_solve(lane_mean,road_mean,np.sqrt(lane_cov),np.sqrt(road_cov))
-    # intersections = filter(lambda x: x > 0, intersections)
-    # d = filter(lambda x: (x > lane_mean and x < road_mean) or (x < lane_mean and x > road_mean),intersections)
-    # print("d:" + str(d))
+        count = count + 1
 
-    th_small = road_mean
-    th_large = lane_mean
+        #### Adaptive Canny Edge ###
 
-    #print("Large threshold: " + str(th_large))
-    #print("Small threshold: " + str(th_small))
+        #look at last gray scale image, and get values for each mask
+        if img_number == 10:
+            print("asdf")
+        mask = colorMask[i]
+        last_img_mask = mask[-int(grayImg.shape[0]*grayImg.shape[1]*crop_pct):]
+        last_gray_img = convertToGray(w,list_of_RGB_Images[-1])
+        last_gray_img = last_gray_img.flatten()[-int(grayImg.shape[0] * grayImg.shape[1] * crop_pct):]
 
-    sub_canny_img = cv2.Canny(grayImg,th_small,th_large)
-    plt.imshow(sub_canny_img,cmap="gray")
-    plt.show()
+        lane_indices = np.nonzero(last_img_mask)
+        lane_values = last_gray_img[lane_indices]
+        road_indices = np.where(last_img_mask == 0)[0]
+        road_values = last_gray_img[road_indices]
 
-    if canny_img is None:
-        canny_img = sub_canny_img
+        if math.isnan(np.mean(lane_values)):
+            print("No lane points for this mask, so using last lane mean")
+        else:
+            lane_mean = np.mean(lane_values)
+
+        road_mean = np.mean(road_values)
+
+        print("Lane mean: " + str(lane_mean))
+        print("Road mean: " + str(road_mean))
+
+        #calc d
+        # lane_cov = cov(lane_values,lane_values)
+        # road_cov = cov(road_values,road_values)
+        #
+        # intersections = gaussian_intersection_solve(lane_mean,road_mean,np.sqrt(lane_cov),np.sqrt(road_cov))
+        # intersections = filter(lambda x: x > 0, intersections)
+        # d = filter(lambda x: (x > lane_mean and x < road_mean) or (x < lane_mean and x > road_mean),intersections)
+        # print("d:" + str(d))
+
+        th_small = road_mean
+        th_large = lane_mean
+
+        #print("Large threshold: " + str(th_large))
+        #print("Small threshold: " + str(th_small))
+
+        sub_canny_img = cv2.Canny(grayImg,th_small,th_large)
+        display_img(sub_canny_img)
+
+        if canny_img is None:
+            canny_img = sub_canny_img
+        else:
+            canny_img = canny_img | sub_canny_img
+
+    ### Keep only bottom part of canny image ###
+
+    display_img(canny_img)
+
+    canny_img = keep_part_of_image(canny_img,.5)
+    display_img(canny_img)
+
+    ### Hough Transform on canny image ###
+    #TODO: May need to modify these more
+
+    rho = 2 #distance resolution in pixels
+    theta = np.pi/180 #angle resolution of accumulator in radians
+    threshold = 110
+    minimum_line_length = 80 #a line has to be at least this long
+    maximum_line_gap = 250 #maximum allowed gap between line segments to treat them as a single line
+    #Based on Robust Detection of Lines Using the Progressive Probabilistic Hough Transform by Matas, J. and Galambos, C. and Kittler, J.V.
+    lines = cv2.HoughLinesP(canny_img, rho, theta, threshold, np.array([]), minimum_line_length, maximum_line_gap)
+
+    ### Filter the resulting lines ###
+
+    thresh_h_percentage = .7
+    slope_cutoff = .3
+    lines = filter_lines(lines,img.shape[0],thresh_h_percentage,slope_cutoff)
+    print("Num final lines: " + str(len(lines)))
+
+    #draw lines on image to see results
+    line_img = draw_lines(img,lines)
+    display_img(line_img, cmap="", convertToRGB=True)
+
+    #reduce down to just 2 lines with some heuristics. In future, would be better to do heuristic of choosing lanes that best overlap with labels from last image
+    lines = select_predictions(lines,img.shape[1])
+    print("Reduced to " + str(len(lines)))
+
+    #draw lines on image to see results
+    line_img = draw_lines(img,lines)
+    display_img(line_img, cmap="", convertToRGB=True)
+
+    ## Region of Interest ## keep a region of interest around each line for lane edges to fit
+    width = 20
+    region_masks = region_of_interest(lines, canny_img, width)
+
+    ## Curve Fitting ##
+    curves_img = img.copy()
+    lane_masks = [np.zeros_like(canny_img),np.zeros_like(canny_img)] #for future training steps
+    for m in region_masks:
+        #apply mask
+        sub_canny_img = cv2.bitwise_and(canny_img,m)
+
+        y_pts, x_pts = np.nonzero(sub_canny_img)
+        f = np.poly1d(np.polyfit(x_pts,y_pts,2)) #curve function
+
+        x = np.arange(min(x_pts),max(x_pts),.05)
+        y = f(x)
+
+        cpts = [np.array(a,dtype=np.int32) for a in zip(x,y)]
+
+        red_color = [28,39,255] #cv2 is BGR
+        cv2.polylines(curves_img, [np.array(cpts)],False,red_color,thickness=5)
+
+        #lane masks for future training steps
+        blank = np.zeros_like(sub_canny_img)
+        cv2.polylines(blank,[np.array(cpts)],False,red_color,thickness=5)
+        h,w = blank.shape
+        if (len(np.nonzero(blank[:,:w/2])[0] > len(np.nonzero(blank[:,w/2:])[0]))): #is left lane
+            lane_masks[0] = blank
+        else: #is right lane
+            lane_masks[1] = blank
+
+    display_img(curves_img, cmap="", convertToRGB=True)
+
+    #save the image
+    cv2.imwrite("predicted_lanes/img" + str(img_number).zfill(4) + "_lanes.jpg", curves_img)
+
+    ### Feed Predictions into Future Steps ###
+
+    #slide over 1 image in image list
+    list_of_RGB_Images.pop(0)
+    list_of_RGB_Images.append(img)
+
+    #get masks for your predictions. Label according to what predominate mask was in last frame
+    h, w,depth = img.shape
+
+    #left
+    last_img_mask_w = np.copy(colorMask[0][-int(grayImg.shape[0] * grayImg.shape[1] * crop_pct):])
+    last_img_mask_w = last_img_mask_w.reshape(int(grayImg.shape[0]*crop_pct),grayImg.shape[1])
+    last_img_mask_w[:,w/2:] = 0
+
+    last_img_mask_y = np.copy(colorMask[1][-int(grayImg.shape[0] * grayImg.shape[1] * crop_pct):])
+    last_img_mask_y = last_img_mask_y.reshape(int(grayImg.shape[0] * crop_pct), grayImg.shape[1])
+    last_img_mask_y[:,w/2:] = 0
+
+    left_label = "w" if len(np.nonzero(last_img_mask_w)[0]) > len(np.nonzero(last_img_mask_y)[0]) else "y"
+
+    #right
+    last_img_mask_w = np.copy(colorMask[0][-int(grayImg.shape[0] * grayImg.shape[1] * crop_pct):])
+    last_img_mask_w = last_img_mask_w.reshape(int(grayImg.shape[0] * crop_pct), grayImg.shape[1])
+    last_img_mask_w[:, :w / 2] = 0
+
+    last_img_mask_y = np.copy(colorMask[1][-int(grayImg.shape[0] * grayImg.shape[1] * crop_pct):])
+    last_img_mask_y = last_img_mask_y.reshape(int(grayImg.shape[0] * crop_pct), grayImg.shape[1])
+    last_img_mask_y[:, :w / 2] = 0
+
+    right_label = "w" if len(np.nonzero(last_img_mask_w)[0]) > len(np.nonzero(last_img_mask_y)[0]) else "y"
+
+    if left_label == "w" and right_label == "y":
+        mask_w = lane_masks[0]
+        mask_y = lane_masks[1]
+    elif left_label == "y" and right_label == "w":
+        mask_w = lane_masks[1]
+        mask_y = lane_masks[0]
+    elif left_label == "y" and right_label == "y":
+        mask_y = cv2.bitwise_and(lane_masks[0],lane_masks[1])
+        mask_w = np.zeros_like(lane_masks[0])
     else:
-        canny_img = canny_img | sub_canny_img
+        mask_w = cv2.bitwise_and(lane_masks[0],lane_masks[1])
+        mask_y = np.zeros_like(lane_masks[0])
 
-### Keep only bottom part of canny image ###
+    display_img(mask_w)
+    display_img(mask_y)
 
-plt.imshow(canny_img,cmap="gray")
-plt.show()
+    #add a depth to each mask because createTrainingData expects it
+    mask_w = np.repeat(mask_w[:, :, np.newaxis], 3, axis=2)
+    mask_y = np.repeat(mask_y[:, :, np.newaxis], 3, axis=2)
 
-canny_img = keep_part_of_image(canny_img,.5)
-plt.imshow(canny_img,cmap="gray")
-plt.show()
+    #pop off first image mask and add this new image mask
+    imageMasks_w.pop(0)
+    imageMasks_w.append(mask_w)
 
-### Hough Transform on canny image ###
-#TODO: May need to modify these more
+    imageMasks_y.pop(0)
+    imageMasks_y.append(mask_y)
 
-rho = 2 #distance resolution in pixels
-theta = np.pi/180 #angle resolution of accumulator in radians
-threshold = 110
-minimum_line_length = 80 #a line has to be at least this long
-maximum_line_gap = 250 #maximum allowed gap between line segments to treat them as a single line
-#Based on Robust Detection of Lines Using the Progressive Probabilistic Hough Transform by Matas, J. and Galambos, C. and Kittler, J.V.
-lines = cv2.HoughLinesP(canny_img, rho, theta, threshold, np.array([]), minimum_line_length, maximum_line_gap)
-
-### Filter the resulting lines ###
-
-thresh_h_percentage = .7
-slope_cutoff = .3
-lines = filter_lines(lines,img.shape[0],thresh_h_percentage,slope_cutoff)
-print("Num final lines: " + str(len(lines)))
-
-#draw lines on image to see results
-line_img = draw_lines(img,lines)
-line_img = cv2.cvtColor(line_img,cv2.COLOR_BGR2RGB)
-plt.imshow(line_img)
-plt.show()
-
-#reduce down to just 2 lines with some heuristics. In future, would be better to do heuristic of choosing lanes that best overlap with labels from last image
-lines = select_predictions(lines,img.shape[1])
-print("Reduced to " + str(len(lines)))
-
-#draw lines on image to see results
-line_img = draw_lines(img,lines)
-line_img = cv2.cvtColor(line_img,cv2.COLOR_BGR2RGB)
-plt.imshow(line_img)
-plt.show()
-
-"""Next steps: 
--keep region of interest around those lines
--collect edges in region that have similar slope as HT line as lane edges
--curve fitting to those lane edges"""
-
-## Region of Interest ## keep a region of interest around each line for lane edges to fit
-width = 20
-masked_canny_img = region_of_interest(lines, canny_img, width)
-plt.imshow(masked_canny_img,cmap="gray")
-plt.show()
-
+    X, y_w, y_y = createTrainingData(list_of_RGB_Images, imageMasks_w, imageMasks_y)
