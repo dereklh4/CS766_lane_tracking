@@ -19,43 +19,43 @@ def createTrainingData(list_of_RGB_Images, imageMasks_w, imageMasks_y):
     B = []
     for img in list_of_RGB_Images:
         # reshape each color val into an array
-        currR = img[:,:,0].reshape(np.shape(img[:,:,0])[0]*np.shape(img[:,:,0])[1]) 
+        currR = img[:,:,0].reshape(np.shape(img[:,:,0])[0]*np.shape(img[:,:,0])[1])
         currG = img[:,:,1].reshape(np.shape(img[:,:,1])[0]*np.shape(img[:,:,1])[1])
         currB = img[:,:,2].reshape(np.shape(img[:,:,2])[0]*np.shape(img[:,:,2])[1])
-        
+
         # concatenate with R, G, and B
         R = np.concatenate((R, currR))
         G = np.concatenate((G, currG))
         B = np.concatenate((B, currB))
-        
+
     y_w = []
     for mask in imageMasks_w:
         # for both white/yellow, there should be a high R value, so just take
         # red value, reshape, then set to binary
-        currY = mask[:,:,0].reshape(np.shape(mask)[0]*np.shape(mask)[1]) 
-        
+        currY = mask[:,:,0].reshape(np.shape(mask)[0]*np.shape(mask)[1])
+
         # convert currY to binary (0 = road, 1 = lane)
         currY = np.where(currY > 0, 1, 0)
-        
+
         y_w = np.concatenate((y_w, currY))
-        
+
     y_y = []
     for mask in imageMasks_y:
         # for both white/yellow, there should be a high R value, so just take
         # red value, reshape, then set to binary
-        currY = mask[:,:,0].reshape(np.shape(mask)[0]*np.shape(mask)[1]) 
-        
+        currY = mask[:,:,0].reshape(np.shape(mask)[0]*np.shape(mask)[1])
+
         # convert currY to binary (0 = road, 1 = lane)
         currY = np.where(currY > 0, 1, 0)
-        
+
         y_y = np.concatenate((y_y, currY))
-        
+
     # create training data to return
     X = np.zeros((len(R), 3))
     X[:,0] = R
     X[:,1] = G
     X[:,2] = B
-    
+
     return X, y_w, y_y
 
 # this function fits data using LDA to find conversion vector from previous images (X,y)
@@ -103,17 +103,17 @@ def readInitImages(crop_pct=.4):
         currImg = cv2.imread('laneData/img'+str(count)+'.jpg')
         whiteMask = cv2.imread('laneData/img'+str(count)+'_lane_w.jpg')
         yellowMask = cv2.imread('laneData/img'+str(count)+'_lane_y.jpg')
-        
+
         # crop y axis
         currImg = currImg[int(480*crop_pct):np.shape(currImg)[0],:]
         whiteMask = whiteMask[int(480*crop_pct):np.shape(whiteMask)[0],:]
         yellowMask = yellowMask[int(480*crop_pct):np.shape(yellowMask)[0],:]
-        
+
         # add to list to return
         rgbImages.append(currImg)
         masks_w.append(whiteMask)
         masks_y.append(yellowMask)
-    
+
     return rgbImages, masks_w, masks_y
 
 def cov(a,b):
@@ -141,11 +141,12 @@ def get_slope(line):
     slope = ((y2-y1) / float(x2-x1))
     return slope
 
-def filter_lines(lines,img_height,thresh_h_percentage,slope_cutoff):
+def filter_lines(lines,img_shape,thresh_h_percentage,slope_cutoff):
     """Lines should go through both the near and far region of an image. The cutoff for near and far is determined by thresh_h.
     Also, lane slopes should be >= slope_cutoff (should probably be around .3 since they should approach vertical lines"""
     final_lines = []
-    thresh_h = img_height * thresh_h_percentage
+    h,w,depth = img_shape
+    thresh_h = h * thresh_h_percentage
     for line in lines:
         for x1, y1, x2, y2 in line:
             if (y1 < thresh_h and y2 > thresh_h) or (y1 > thresh_h and y2 < thresh_h):  # far near
@@ -178,13 +179,15 @@ def draw_lines(img,lines):
     return line_img
 
 def get_lowest_line(lines):
-
+    """Note: Takes into account the slope of the line too. Prefers higher slopes. Also more extreme x values"""
     #actually the "lowest" line will be the one with the highest y
     max_loc = None
     max_value = -sys.maxsize
     for i in np.arange(0,len(lines)):
         line = lines[i]
         x1,y1,x2,y2 = line[0]
+        y1 = y1 + 30*abs(get_slope(line))
+        y2 = y2 + 30*abs(get_slope(line))
         if y1 > max_value:
             max_value = y1
             max_loc = i
@@ -233,17 +236,25 @@ def select_predictions(lines,img_w):
         pos_lines = list(map(lambda x: x[0], pos_slope_tuples))
         neg_lines = list(map(lambda x: x[0], neg_slope_tuples))
 
-        i,min_val = get_lowest_line(pos_lines)
-        j,min_val = get_lowest_line(neg_lines)
-
-        final_lines.append(pos_lines[i])
-        final_lines.append(neg_lines[j])
+        if len(pos_lines) > 0:
+            i,min_val = get_lowest_line(pos_lines)
+            final_lines.append(pos_lines[i])
+        if len(neg_lines) > 0:
+            j,min_val = get_lowest_line(neg_lines)
+            final_lines.append(neg_lines[j])
 
     return final_lines
 
 def region_of_interest(lines,canny_img,width=20):
     if len(lines) > 2:
         raise Exception("Shouldn't be calculating a region of interest for len(lines) > 2")
+
+    #sort lines by midpoint x value so always comes out in same order
+    if len(lines) == 2:
+        line1 = lines[0]
+        line2 = lines[1]
+        if ((line1[0][0]+line1[0][2])/2) > ((line2[0][0]+line2[0][2])/2):
+            lines[0], lines[1] = lines[1], lines[0]
 
     masks = []
     for line in lines:
@@ -258,16 +269,16 @@ def region_of_interest(lines,canny_img,width=20):
 
         cv2.fillPoly(mask, poly,1)
 
-        #only allowed to go up to 30% of image
-        pct = .3
+        #only allowed to be up to 30% of image length
+        pct = .2
         h,w = canny_img.shape
-        mask[0:int(h * (1-pct))][0:w] = 0
+        bottom = max(left[1],left[3])
+        limit = max(int(h * (1-pct)) - (h-bottom),int(h * (1-.35))) #still can't go past 35% of image though
+        mask[0:limit][0:w] = 0
 
         display_img(mask)
 
         masks.append(mask)
-
-        #masked_canny_img = cv2.bitwise_and(canny_img, mask)
 
     return masks
 
@@ -289,6 +300,14 @@ list_of_RGB_Images, imageMasks_w, imageMasks_y = readInitImages(crop_pct)
 X, y_w, y_y = createTrainingData(list_of_RGB_Images, imageMasks_w, imageMasks_y)
 
 img_number = 5
+lane_means = [90,90] #save means used so can use again if algorithm gets off track
+road_means = [50,50]
+last_pos_line = None #save last lines predicted
+last_neg_line = None
+last_fs = [None,None] #save curve functions
+last_xrange = [[None,None],[None,None]] #save info from curve fitting
+used_last_frame_prediction = False
+num_times_last_frame_prediction = 0
 while img_number < 5619:
     img_number += 1
 
@@ -331,8 +350,6 @@ while img_number < 5619:
         #### Adaptive Canny Edge ###
 
         #look at last gray scale image, and get values for each mask
-        if img_number == 10:
-            print("asdf")
         mask = colorMask[i]
         last_img_mask = mask[-int(grayImg.shape[0]*grayImg.shape[1]*crop_pct):]
         last_gray_img = convertToGray(w,list_of_RGB_Images[-1])
@@ -343,24 +360,19 @@ while img_number < 5619:
         road_indices = np.where(last_img_mask == 0)[0]
         road_values = last_gray_img[road_indices]
 
-        if math.isnan(np.mean(lane_values)):
-            print("No lane points for this mask, so using last lane mean")
+        if len(lane_values) == 0: #use the thresholds from last time
+            print("No lane points for this mask, so using last means")
+            lane_mean = lane_means[i]
+            road_mean = road_means[i]
         else:
             lane_mean = np.mean(lane_values)
+            road_mean = np.mean(road_values)
 
-        road_mean = np.mean(road_values)
+        lane_means[i] = lane_mean
+        road_means[i] = road_mean
 
         print("Lane mean: " + str(lane_mean))
         print("Road mean: " + str(road_mean))
-
-        #calc d
-        # lane_cov = cov(lane_values,lane_values)
-        # road_cov = cov(road_values,road_values)
-        #
-        # intersections = gaussian_intersection_solve(lane_mean,road_mean,np.sqrt(lane_cov),np.sqrt(road_cov))
-        # intersections = filter(lambda x: x > 0, intersections)
-        # d = filter(lambda x: (x > lane_mean and x < road_mean) or (x < lane_mean and x > road_mean),intersections)
-        # print("d:" + str(d))
 
         th_small = road_mean
         th_large = lane_mean
@@ -397,8 +409,8 @@ while img_number < 5619:
     ### Filter the resulting lines ###
 
     thresh_h_percentage = .7
-    slope_cutoff = .3
-    lines = filter_lines(lines,img.shape[0],thresh_h_percentage,slope_cutoff)
+    slope_cutoff = .35
+    lines = filter_lines(lines,img.shape,thresh_h_percentage,slope_cutoff)
     print("Num final lines: " + str(len(lines)))
 
     #draw lines on image to see results
@@ -409,25 +421,63 @@ while img_number < 5619:
     lines = select_predictions(lines,img.shape[1])
     print("Reduced to " + str(len(lines)))
 
+    if len(lines) < 2:
+        if num_times_last_frame_prediction < 8:
+            print("Unable to make 2 predictions, so using help from last frame's predictions")
+            if len(lines) == 0:
+                lines.extend(last_neg_line)
+                lines.extend(last_pos_line)
+            if len(lines) == 1:
+                pos_line = list(filter(lambda line: get_slope(line) > 0,lines))
+                if len(pos_line) > 0:
+                    lines.extend(last_neg_line)
+                else:
+                    lines.extend(last_pos_line)
+            used_last_frame_prediction = True
+            num_times_last_frame_prediction += 1
+        else:
+            pass #live with just one or no prediction
+    else:
+        used_last_frame_prediction = False
+        num_times_last_frame_prediction = 0
+    last_pos_line = list(filter(lambda line: get_slope(line) > 0,lines))
+    last_neg_line = list(filter(lambda line: get_slope(line) < 0,lines))
+
     #draw lines on image to see results
     line_img = draw_lines(img,lines)
     display_img(line_img, cmap="", convertToRGB=True)
 
+    #cv2.imwrite("predicted_lanes/img" + str(img_number).zfill(4) + "_ht.jpg", line_img)
+
     ## Region of Interest ## keep a region of interest around each line for lane edges to fit
-    width = 20
+    width = 55
     region_masks = region_of_interest(lines, canny_img, width)
 
     ## Curve Fitting ##
     curves_img = img.copy()
     lane_masks = [np.zeros_like(canny_img),np.zeros_like(canny_img)] #for future training steps
-    for m in region_masks:
+    for i in range(len(region_masks)):
+        m = region_masks[i]
         #apply mask
         sub_canny_img = cv2.bitwise_and(canny_img,m)
 
-        y_pts, x_pts = np.nonzero(sub_canny_img)
-        f = np.poly1d(np.polyfit(x_pts,y_pts,2)) #curve function
+        #plt.imsave("predicted_lanes/img" + str(img_number).zfill(4) + "_ksubcanny_" + str(i) + ".jpg",sub_canny_img)
 
-        x = np.arange(min(x_pts),max(x_pts),.05)
+        y_pts, x_pts = np.nonzero(sub_canny_img)
+        if len(x_pts) < 100 and len(y_pts) < 100:
+            print("Empty sub canny image (or few points), so using last curve function")
+            f = last_fs[i]
+            minx = last_xrange[i][0]
+            maxx = last_xrange[i][1]
+        else:
+            f = np.poly1d(np.polyfit(x_pts,y_pts,2)) #curve function
+            minx = min(x_pts)
+            maxx = max(x_pts)
+        last_fs[i] = f #save for later
+        last_xrange[i][0] = minx
+        last_xrange[i][1] = maxx
+
+        x = np.arange(minx,maxx,.05)
         y = f(x)
 
         cpts = [np.array(a,dtype=np.int32) for a in zip(x,y)]
@@ -437,7 +487,8 @@ while img_number < 5619:
 
         #lane masks for future training steps
         blank = np.zeros_like(sub_canny_img)
-        cv2.polylines(blank,[np.array(cpts)],False,red_color,thickness=5)
+        mark_color = [255,255,255]
+        cv2.polylines(blank,[np.array(cpts)],False,mark_color,thickness=5)
         h,w = blank.shape
         if (len(np.nonzero(blank[:,:w/2])[0] > len(np.nonzero(blank[:,w/2:])[0]))): #is left lane
             lane_masks[0] = blank
@@ -478,7 +529,7 @@ while img_number < 5619:
     last_img_mask_y = last_img_mask_y.reshape(int(grayImg.shape[0] * crop_pct), grayImg.shape[1])
     last_img_mask_y[:, :w / 2] = 0
 
-    right_label = "w" if len(np.nonzero(last_img_mask_w)[0]) > len(np.nonzero(last_img_mask_y)[0]) else "y"
+    right_label = "y" if len(np.nonzero(last_img_mask_w)[0]) < len(np.nonzero(last_img_mask_y)[0]) else "w"
 
     if left_label == "w" and right_label == "y":
         mask_w = lane_masks[0]
