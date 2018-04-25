@@ -150,12 +150,13 @@ def filter_lines(lines,img_shape,thresh_h_percentage,slope_cutoff):
     final_lines = []
     h,w,depth = img_shape
     thresh_h = h * thresh_h_percentage
-    for line in lines:
-        for x1, y1, x2, y2 in line:
-            if (y1 < thresh_h and y2 > thresh_h) or (y1 > thresh_h and y2 < thresh_h):  # far near
-                slope = get_slope(line)
-                if abs(slope) >= slope_cutoff: #slope is likely to approach "vertical" slopes
-                    final_lines.append(line)
+    if type(lines) is np.ndarray:
+	    for line in lines:
+			for x1, y1, x2, y2 in line:
+				if (y1 < thresh_h and y2 > thresh_h) or (y1 > thresh_h and y2 < thresh_h):  # far near
+				    slope = get_slope(line)
+				    if abs(slope) >= slope_cutoff: #slope is likely to approach "vertical" slopes
+				        final_lines.append(line)
     return final_lines
 
 def keep_part_of_image(img,h_percentage_to_keep):
