@@ -70,15 +70,15 @@ def applyLDA(X, y):
     w = clf.coef_
 
     # scale between .1 and 1
-    # import sklearn
-    # scaler = sklearn.preprocessing.MinMaxScaler(feature_range=(.1,1))
-    # scaler = scaler.fit(w.reshape(-1,1))
-    # w_scaled = scaler.transform(w.reshape(-1,1))
-    #
-    # w_scaled = w_scaled / np.linalg.norm(w_scaled,1)
-    # w = np.transpose(w_scaled)
+    import sklearn
+    scaler = sklearn.preprocessing.MinMaxScaler(feature_range=(.1,1))
+    scaler = scaler.fit(w.reshape(-1,1))
+    w_scaled = scaler.transform(w.reshape(-1,1))
 
-    w = np.abs(w)
+    w_scaled = w_scaled / np.linalg.norm(w_scaled,1)
+    w = np.transpose(w_scaled)
+
+    #w = np.abs(w)
 
     return w
 
@@ -138,8 +138,11 @@ def gaussian_intersection_solve(m1,m2,std1,std2):
 
 def get_slope(line):
     x1, y1, x2, y2 = line[0]
-    slope = ((y2-y1) / float(x2-x1))
-    return slope
+    if float(x2-x1) == 0:
+        return float("inf")
+    else:
+        slope = ((y2-y1) / float(x2-x1))
+        return slope
 
 def filter_lines(lines,img_shape,thresh_h_percentage,slope_cutoff):
     """Lines should go through both the near and far region of an image. The cutoff for near and far is determined by thresh_h.
@@ -186,8 +189,11 @@ def get_lowest_line(lines):
     for i in np.arange(0,len(lines)):
         line = lines[i]
         x1,y1,x2,y2 = line[0]
-        y1 = y1 + 30*abs(get_slope(line))
-        y2 = y2 + 30*abs(get_slope(line))
+        slope = get_slope(line)
+        if slope == float("inf"): #vertical line
+            continue
+        y1 = y1 + 30*abs(slope)
+        y2 = y2 + 30*abs(slope)
         if y1 > max_value:
             max_value = y1
             max_loc = i
@@ -202,7 +208,7 @@ def select_predictions(lines,img_w):
     final_lines = []
 
     line_slope_tuples = list(map(lambda x: (x,get_slope(x)), lines))
-    pos_slope_tuples = list(filter(lambda x: x[1] > 0, line_slope_tuples))
+    pos_slope_tuples = list(filter(lambda x: x[1] > 0 and x[1] != float("inf"), line_slope_tuples))
     neg_slope_tuples = list(filter(lambda x: x[1] <= 0, line_slope_tuples))
 
     if len(lines) == 0: #no predictions in this case...:(
@@ -214,7 +220,7 @@ def select_predictions(lines,img_w):
             final_line = neg_slope_tuples[0][0]
             final_lines.append(neg_slope_tuples[0][0])
             lines = list(map(lambda x: x[0],pos_slope_tuples))
-        if len(pos_slope_tuples) == 1:
+        elif len(pos_slope_tuples) == 1:
             final_line = pos_slope_tuples[0][0]
             final_lines.append(pos_slope_tuples[0][0])
             lines = list(map(lambda x: x[0],neg_slope_tuples))
@@ -313,9 +319,6 @@ while img_number < 5619:
 
     print("\n*** Running on image " + str(img_number) + " ***")
 
-    if img_number > 1000:
-        break
-
     # for each mask, compute LDA
     colorMask = [y_w, y_y]
     gradientEnhancedVectors = []
@@ -335,6 +338,7 @@ while img_number < 5619:
 
         if (w == 0).all(): #if have no predictions for a certain mask, will get all 0 weights. In that case, default to this
             w = np.array([.1,.4,.5])
+        print("w: " + str(w))
 
         # convert image to gray with weight for respective class (w, then y)
         grayImg = convertToGray(w, img)
@@ -396,7 +400,6 @@ while img_number < 5619:
     display_img(canny_img)
 
     ### Hough Transform on canny image ###
-    #TODO: May need to modify these more
 
     rho = 2 #distance resolution in pixels
     theta = np.pi/180 #angle resolution of accumulator in radians
@@ -430,9 +433,11 @@ while img_number < 5619:
             if len(lines) == 1:
                 pos_line = list(filter(lambda line: get_slope(line) > 0,lines))
                 if len(pos_line) > 0:
-                    lines.extend(last_neg_line)
+                    if last_neg_line:
+                        lines.extend(last_neg_line)
                 else:
-                    lines.extend(last_pos_line)
+                    if last_pos_line:
+                        lines.extend(last_pos_line)
             used_last_frame_prediction = True
             num_times_last_frame_prediction += 1
         else:
