@@ -193,8 +193,8 @@ def get_lowest_line(lines):
         slope = get_slope(line)
         if slope == float("inf"): #vertical line
             continue
-        y1 = y1 + 30*abs(slope)
-        y2 = y2 + 30*abs(slope)
+        y1 = y1 + 40*abs(slope)
+        y2 = y2 + 40*abs(slope)
         if y1 > max_value:
             max_value = y1
             max_loc = i
@@ -429,8 +429,10 @@ while img_number < 5619:
         if num_times_last_frame_prediction < 8:
             print("Unable to make 2 predictions, so using help from last frame's predictions")
             if len(lines) == 0:
-                lines.extend(last_neg_line)
-                lines.extend(last_pos_line)
+                if last_neg_line:
+                    lines.extend(last_neg_line)
+                if last_pos_line:
+                    lines.extend(last_pos_line)
             if len(lines) == 1:
                 pos_line = list(filter(lambda line: get_slope(line) > 0,lines))
                 if len(pos_line) > 0:
