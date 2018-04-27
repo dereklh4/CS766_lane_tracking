@@ -70,15 +70,15 @@ def applyLDA(X, y):
     w = clf.coef_
 
     # scale between .1 and 1
-    import sklearn
-    scaler = sklearn.preprocessing.MinMaxScaler(feature_range=(.1,1))
-    scaler = scaler.fit(w.reshape(-1,1))
-    w_scaled = scaler.transform(w.reshape(-1,1))
+    #import sklearn
+    #scaler = sklearn.preprocessing.MinMaxScaler(feature_range=(.1,1))
+    #scaler = scaler.fit(w.reshape(-1,1))
+    #w_scaled = scaler.transform(w.reshape(-1,1))
 
-    w_scaled = w_scaled / np.linalg.norm(w_scaled,1)
-    w = np.transpose(w_scaled)
+    #w_scaled = w_scaled / np.linalg.norm(w_scaled,1)
+    #w = np.transpose(w_scaled)
 
-    #w = np.abs(w)
+    w = np.abs(w)
 
     return w
 
@@ -193,8 +193,8 @@ def get_lowest_line(lines):
         slope = get_slope(line)
         if slope == float("inf"): #vertical line
             continue
-        y1 = y1 + 40*abs(slope)
-        y2 = y2 + 40*abs(slope)
+        y1 = y1 + 30*abs(slope)
+        y2 = y2 + 30*abs(slope)
         if y1 > max_value:
             max_value = y1
             max_loc = i
